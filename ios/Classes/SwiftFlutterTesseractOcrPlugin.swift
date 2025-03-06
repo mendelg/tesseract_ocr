@@ -1,17 +1,20 @@
 import Flutter
 import UIKit
 import SwiftyTesseract
+import Combine
 
 public class SwiftFlutterTesseractOcrPlugin: NSObject, FlutterPlugin {
+    private var cancellables = Set<AnyCancellable>()
+
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "flutter_tesseract_ocr", binaryMessenger: registrar.messenger())
         let instance = SwiftFlutterTesseractOcrPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
-    public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    initializeTessData()
 
-    if call.method == "extractText" {
+    public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        initializeTessData()
+
         guard let args = call.arguments as? [String: Any],
               let imagePath = args["imagePath"] as? String,
               let language = args["language"] as? String,
@@ -20,59 +23,58 @@ public class SwiftFlutterTesseractOcrPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            result(FlutterError(code: "DIRECTORY_ERROR", message: "Could not access documents directory.", details: nil))
+        let fileManager = FileManager.default
+        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            result(FlutterError(code: "DIRECTORY_ERROR", message: "Documents directory inaccessible.", details: nil))
             return
         }
 
-        let tessDataPath = documentsURL.path
-
-        // Safely unwrap Bundle
-        guard let bundle = Bundle(path: tessDataPath) else {
-            result(FlutterError(code: "BUNDLE_ERROR", message: "Could not initialize Tesseract bundle with provided path.", details: nil))
+        let tessDataPath = documentsURL.appendingPathComponent("tessdata").path
+        guard let swiftyTesseract = SwiftyTesseract(language: .custom(args["language"] as? String ?? "eng"), bundle: Bundle(path: documentsURL.path)) else {
+            result(FlutterError(code: "INIT_ERROR", message: "Failed to initialize SwiftyTesseract", details: nil))
             return
         }
 
-        let swiftyTesseract = SwiftyTesseract(language: .custom(language), bundle: bundle)
-
-        swiftyTesseract.performOCR(on: UIImage(contentsOfFile: imagePath)!) { recognizedString in
-            guard let extractText = recognizedString else {
-                result(FlutterError(code: "OCR_FAILED", message: "OCR failed", details: nil))
-                return
+        if call.method == "extractText" {
+            swiftyTesseract.performOCR(on: UIImage(contentsOfFile: imagePath)!) { recognizedString in
+                guard let extractText = recognizedString else {
+                    result(FlutterError(code: "OCR_FAILED", message: "OCR failed", details: nil))
+                    return
+                }
+                result(extractText)
             }
-            result(extractText)
+        } else if call.method == "extractHocr" {
+            swiftyTesseract.performOCRPublisher(on: UIImage(contentsOfFile: imagePath)!, format: .hOCR)
+                .sink(receiveCompletion: { completion in
+                    if case let .failure(error) = completion {
+                        result(FlutterError(code: "OCR_FAILED", message: "OCR failed: \(error.localizedDescription)", details: nil))
+                    }
+                }, receiveValue: { hocrString in
+                    result(hocrString)
+                })
+                .store(in: &cancellables)
+        } else {
+            result(FlutterMethodNotImplemented)
         }
     }
-}
 
-  func initializeTessData() {
-    let fileManager = FileManager.default
-
-    // Source: tessdata in app bundle
-    guard let sourceURL = Bundle.main.resourceURL?.appendingPathComponent("tessdata") else {
-        print("Error: Could not find tessdata in bundle.")
-        return
-    }
-
-    // Destination: Documents/tessdata
-    guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
-        print("Error: Could not access documents directory.")
-        return
-    }
-    let destURL = documentsURL.appendingPathComponent("tessdata")
-
-    do {
-        // Remove existing tessdata directory if it exists
-        if fileManager.fileExists(atPath: destURL.path) {
-            try fileManager.removeItem(at: destURL)
+    func initializeTessData() {
+        let fileManager = FileManager.default
+        guard let sourceURL = Bundle.main.resourceURL?.appendingPathComponent("tessdata"),
+              let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            print("Error accessing tessdata or documents directory.")
+            return
         }
+        let destURL = documentsURL.appendingPathComponent("tessdata")
 
-        // Copy tessdata from bundle to documents directory
-        try fileManager.copyItem(at: sourceURL, to: destURL)
-        print("✅ tessdata copied successfully to \(destURL.path).")
-    } catch {
-        print("❌ Failed to copy tessdata: \(error)")
+        do {
+            if fileManager.fileExists(atPath: destURL.path) {
+                try fileManager.removeItem(at: destURL)
+            }
+            try fileManager.copyItem(at: sourceURL, to: destURL)
+            print("✅ tessdata copied successfully to \(destURL.path).")
+        } catch {
+            print("❌ Failed to copy tessdata: \(error)")
+        }
     }
-}
-
 }
