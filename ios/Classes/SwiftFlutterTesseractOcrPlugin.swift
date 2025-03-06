@@ -9,44 +9,67 @@ public class SwiftFlutterTesseractOcrPlugin: NSObject, FlutterPlugin {
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
     
-    public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        initializeTessData()
-        if call.method == "extractText" {
-            
-            guard let args = call.arguments else {
-                result("iOS could not recognize flutter arguments in method: (sendParams)")
+   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    initializeTessData()
+
+    if call.method == "extractText" {
+        guard let args = call.arguments as? [String: Any],
+              let imagePath = args["imagePath"] as? String,
+              let language = args["language"] as? String,
+              let image = UIImage(contentsOfFile: imagePath) else {
+            result(FlutterError(code: "INVALID_ARGS", message: "Invalid arguments passed", details: nil))
+            return
+        }
+
+        // Determine the tessdata path
+        let fileManager = FileManager.default
+        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            result(FlutterError(code: "DIRECTORY_ERROR", message: "Could not access documents directory.", details: nil))
+            return
+        }
+        let tessDataPath = documentsURL.appendingPathComponent("tessdata").path
+
+        // Initialize SwiftyTesseract with the custom tessdata path
+        let swiftyTesseract = SwiftyTesseract(language: .custom(language), bundle: Bundle(path: tessDataPath))
+
+        swiftyTesseract.performOCR(on: image) { recognizedString in
+            guard let extractText = recognizedString else {
+                result(FlutterError(code: "OCR_FAILED", message: "OCR failed", details: nil))
                 return
             }
-            
-            let params: [String : Any] = args as! [String : Any]
-            let language: String? = params["language"] as? String
-            var swiftyTesseract = SwiftyTesseract(language: .english)
-            if let language {
-                swiftyTesseract = SwiftyTesseract(language: .custom(language))
-            }
-            let  imagePath = params["imagePath"] as! String
-            guard let image = UIImage(contentsOfFile: imagePath)else { return }
-            
-            swiftyTesseract.performOCR(on: image) { recognizedString in
-                
-                guard let extractText = recognizedString else { return }
-                result(extractText)
-            }
+            result(extractText)
         }
     }
-    
-    func initializeTessData() {
-        
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        let destURL = documentsURL!.appendingPathComponent("tessdata")
-        
-        let sourceURL = Bundle.main.bundleURL.appendingPathComponent("tessdata")
-        
-        let fileManager = FileManager.default
-        do {
-            try fileManager.createSymbolicLink(at: sourceURL, withDestinationURL: destURL)
-        } catch {
-            print(error)
-        }
+}
+
+   func initializeTessData() {
+    let fileManager = FileManager.default
+
+    // Source: tessdata in app bundle
+    guard let sourceURL = Bundle.main.resourceURL?.appendingPathComponent("tessdata") else {
+        print("Error: Could not find tessdata in bundle.")
+        return
     }
+
+    // Destination: Documents/tessdata
+    guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+        print("Error: Could not access documents directory.")
+        return
+    }
+    let destURL = documentsURL.appendingPathComponent("tessdata")
+
+    do {
+        // Remove existing tessdata directory if it exists
+        if fileManager.fileExists(atPath: destURL.path) {
+            try fileManager.removeItem(at: destURL)
+        }
+
+        // Copy tessdata from bundle to documents directory
+        try fileManager.copyItem(at: sourceURL, to: destURL)
+        print("✅ tessdata copied successfully to \(destURL.path).")
+    } catch {
+        print("❌ Failed to copy tessdata: \(error)")
+    }
+}
+
 }
