@@ -8,7 +8,6 @@ public class SwiftFlutterTesseractOcrPlugin: NSObject, FlutterPlugin {
         let instance = SwiftFlutterTesseractOcrPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
-    
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     initializeTessData()
 
@@ -21,18 +20,22 @@ public class SwiftFlutterTesseractOcrPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        let fileManager = FileManager.default
-        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             result(FlutterError(code: "DIRECTORY_ERROR", message: "Could not access documents directory.", details: nil))
             return
         }
 
-        // Important change here
         let tessDataPath = documentsURL.path
 
-        let swiftyTesseract = SwiftyTesseract(language: .custom(language), bundle: Bundle(path: tessDataPath))
+        // Safely unwrap Bundle
+        guard let bundle = Bundle(path: tessDataPath) else {
+            result(FlutterError(code: "BUNDLE_ERROR", message: "Could not initialize Tesseract bundle with provided path.", details: nil))
+            return
+        }
 
-        swiftyTesseract.performOCR(on: image) { recognizedString in
+        let swiftyTesseract = SwiftyTesseract(language: .custom(language), bundle: bundle)
+
+        swiftyTesseract.performOCR(on: UIImage(contentsOfFile: imagePath)!) { recognizedString in
             guard let extractText = recognizedString else {
                 result(FlutterError(code: "OCR_FAILED", message: "OCR failed", details: nil))
                 return
@@ -42,7 +45,6 @@ public class SwiftFlutterTesseractOcrPlugin: NSObject, FlutterPlugin {
     }
 }
 
- 
   func initializeTessData() {
     let fileManager = FileManager.default
 
