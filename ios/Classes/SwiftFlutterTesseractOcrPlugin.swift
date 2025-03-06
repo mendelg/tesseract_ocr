@@ -26,18 +26,15 @@ public class SwiftFlutterTesseractOcrPlugin: NSObject, FlutterPlugin {
             result(FlutterError(code: "DIRECTORY_ERROR", message: "Could not access documents directory.", details: nil))
             return
         }
-        let tessDataPath = documentsURL.appendingPathComponent("tessdata").path
 
-        guard let bundle = Bundle(path: tessDataPath) else {
-            result(FlutterError(code: "BUNDLE_ERROR", message: "Could not initialize bundle with tessdata path.", details: nil))
-            return
-        }
+        // Important change here
+        let tessDataPath = documentsURL.path
 
-        let swiftyTesseract = SwiftyTesseract(language: .custom(language), bundle: bundle)
+        let swiftyTesseract = SwiftyTesseract(language: .custom(language), bundle: Bundle(path: tessDataPath))
 
         swiftyTesseract.performOCR(on: image) { recognizedString in
             guard let extractText = recognizedString else {
-                result(FlutterError(code: "OCR_ERROR", message: "OCR failed to recognize text", details: nil))
+                result(FlutterError(code: "OCR_FAILED", message: "OCR failed", details: nil))
                 return
             }
             result(extractText)
@@ -45,7 +42,8 @@ public class SwiftFlutterTesseractOcrPlugin: NSObject, FlutterPlugin {
     }
 }
 
-   func initializeTessData() {
+ 
+  func initializeTessData() {
     let fileManager = FileManager.default
 
     // Source: tessdata in app bundle
